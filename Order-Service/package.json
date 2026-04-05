@@ -1,4 +1,9 @@
 {
+  "name": "order-service",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node order.js"
+  },
   "dependencies": {
     "express": "^5.2.1"
   }
