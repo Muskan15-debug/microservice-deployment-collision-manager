@@ -8,6 +8,6 @@ RUN npm install
 
 COPY . .
 
-EXPOSE 
+EXPOSE 5050
 
 CMD ["node", "user.js"]
