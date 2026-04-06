@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 8000;
-const USER_SERVICE_URL = process.env.USER_SERVICE_URL || 'http://localhost:5050';
+const USER_SERVICE_URL = process.env.USER_SERVICE_URL;
 
 app.get('/order/:id', async (req, res) => {
     try {
