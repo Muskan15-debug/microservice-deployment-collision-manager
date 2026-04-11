@@ -16,3 +16,11 @@ services:
       - USER_SERVICE_URL=http://user-service:5050
     depends_on:
       - user-service
+
+  contract-test:
+    build: ./tests/contract-test
+    container_name: contract-test
+    environment:
+      - USER_SERVICE_URL=http://user-service:5050
+    depends_on:
+      - user-service
