@@ -1,0 +1,31 @@
+name: Microservice Cotract Check
+
+on: 
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  contract-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build and Run Services
+        run: docker-compose up -d --build user-service
+
+      - name: Wait for the Service to be Ready
+        run: |
+          sleep 5
+
+      - name: Run Contract Test
+        run: docker-compose up --build contract-test
+
+      - name: Stop Container
+        if: always()
+        run: docket-compose down
+
+          
