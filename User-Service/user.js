@@ -4,9 +4,9 @@ const app = express();
 const PORT = 5050;
 
 const users = {
-  1: { id: 1, fullname: "Alice", email: "alice@test.com" },
-  2: { id: 2, fullname: "Bob", email: "bob@test.com" },
-  3: { id: 3, fullname: "Charlie", email: "charlie@test.com" }
+  1: { id: 1, name: "Alice", email: "alice@test.com" },
+  2: { id: 2, name: "Bob", email: "bob@test.com" },
+  3: { id: 3, name: "Charlie", email: "charlie@test.com" }
 };
 
 // Route: GET /user/:id
