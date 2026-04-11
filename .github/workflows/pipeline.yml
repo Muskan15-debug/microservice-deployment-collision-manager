@@ -26,6 +26,6 @@ jobs:
 
       - name: Stop Container
         if: always()
-        run: docket compose down
+        run: docker compose down
 
           
