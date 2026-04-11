@@ -1,4 +1,3 @@
-const fetch = require("node-fetch");
 const USER_SERVICE_URL = process.env.USER_SERVICE_URL || "http://localhost:5050";
 
 async function runTest() {
