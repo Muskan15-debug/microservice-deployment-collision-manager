@@ -15,17 +15,17 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build and Run Services
-        run: docker-compose up -d --build user-service
+        run: docker compose up -d --build user-service
 
       - name: Wait for the Service to be Ready
         run: |
           sleep 5
 
       - name: Run Contract Test
-        run: docker-compose up --build contract-test
+        run: docker compose up --build contract-test
 
       - name: Stop Container
         if: always()
-        run: docket-compose down
+        run: docket compose down
 
           
