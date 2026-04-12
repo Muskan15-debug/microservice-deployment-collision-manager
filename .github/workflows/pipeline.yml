@@ -1,34 +1,35 @@
 name: Microservice Cotract Check
 
-on: 
-  pull_request:
-    branches:
-      - main
-
-concurrency:
-  group : deployment-queue
-  cancel-in-progress : false
+on:
+  workflow_dispatch:
+    inputs:
+      prNumber:
+        description: "Pull Request Number"
+        required: true
+      branch:
+        description: "Branch Name"
+        required: true
 
 jobs:
   contract-test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
 
-      - name: Build and Run Services
+      - name: Start User Service
         run: docker compose up -d --build user-service
 
-      - name: Wait for the Service to be Ready
-        run: |
-          sleep 5
+      - name: Wait for Service
+        run: sleep 5
 
       - name: Run Contract Test
         run: docker compose up --build --abort-on-container-exit --exit-code-from contract-test contract-test
 
-      - name: Stop Container
+      - name: Cleanup
         if: always()
         run: docker compose down
 
-          
