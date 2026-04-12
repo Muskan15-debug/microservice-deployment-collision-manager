@@ -1,6 +1,7 @@
 const express = require("express");
-const fs = require("fs");
+const fs = require("node:fs");
 const axios = require("axios");
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
@@ -9,14 +10,14 @@ const FILE = "./queue.json";
 const STATE_FILE = "./state.json";
 const PORT = 4000;
 
-const OWNER = "Muskan15-debug";
-const REPO = "microservice-deployment-collision-manager";
-const WORKFLOW = "pipeline.yml";
-const TOKEN = process.env.GITHUB_TOKEN;
+const TOKEN = process.env.GITHUB_TOKEN
+const OWNER = process.env.OWNER
+const REPO = process.env.REPO
+const WORKFLOW = process.env.WORKFLOW
 
 // ---------- Init State ----------
 if (!fs.existsSync(STATE_FILE)) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ running: false }, null, 2));
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ running: false, current_job: Number.NaN}, null, 2));
 }
 
 // ---------- Queue Helpers ----------
@@ -42,7 +43,7 @@ function score(priority) {
   return 1;
 }
 
-function addPR(prNumber, branch, priority) {
+function addPR(prNumber, branch, sha, priority) {
   const queue = loadQueue();
 
   const alreadyExists = queue.find(q => q.prNumber == prNumber);
@@ -54,6 +55,7 @@ function addPR(prNumber, branch, priority) {
   queue.push({
     prNumber,
     branch,
+    sha,
     priority,
     createdAt: Date.now()
   });
@@ -86,7 +88,7 @@ async function triggerWorkflow(job) {
   await axios.post(
     url,
     {
-      ref: "main",
+      ref: job.branch,
       inputs: {
         prNumber: String(job.prNumber),
         branch: job.branch
@@ -101,6 +103,28 @@ async function triggerWorkflow(job) {
   );
 
   console.log(`Triggered PR #${job.prNumber}`);
+}
+
+async function updatePRStatus(sha, state, description) {
+  const url = `https://api.github.com/repos/${OWNER}/${REPO}/statuses/${sha}`;
+
+  await axios.post(
+    url,
+    {
+      state, // pending, success, failure, error
+      context: "collision-manager",
+      description,
+      target_url: `https://github.com/${OWNER}/${REPO}/actions`
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        Accept: "application/vnd.github+json"
+      }
+    }
+  );
+
+  console.log(`Status updated: ${state} for ${sha}`);
 }
 
 async function runNextIfIdle() {
@@ -118,13 +142,27 @@ async function runNextIfIdle() {
     return;
   }
 
-  saveState({ running: true });
+  saveState({ 
+    running: true,
+    current_job: job 
+  });
 
   try {
+    await updatePRStatus(
+      job.sha,
+      "pending",
+      "Deployment validation running"
+    );
     await triggerWorkflow(job);
   } catch (err) {
     console.error("Failed trigger:", err.message);
-    saveState({ running: false });
+    console.error("Data:", JSON.stringify(err.response?.data, null, 2));
+    await updatePRStatus(
+      job.sha,
+      "error",
+      "Failed to start deployment pipeline"
+    );
+    saveState({ running: false, current_job: Number.NaN});
   }
 }
 
@@ -139,13 +177,14 @@ app.post("/webhook", async (req, res) => {
 
     if (["opened", "reopened", "synchronize", "labeled"].includes(action)) {
       const pr = req.body.pull_request;
+      const sha = pr.head.sha;
       const labels = pr.labels.map(l => l.name);
 
       let priority = "normal";
       if (labels.includes("hotfix")) priority = "hotfix";
       else if (labels.includes("high")) priority = "high";
 
-      addPR(pr.number, pr.head.ref, priority);
+      addPR(pr.number, pr.head.ref, sha, priority);
       await runNextIfIdle();
     }
 
@@ -157,7 +196,31 @@ app.post("/webhook", async (req, res) => {
     const action = req.body.action;
 
     if (action === "completed") {
-      saveState({ running: false });
+      const state = loadState();
+      const job = state.current_job;
+
+      if(job===Number.isNaN()){
+        saveState({ running: false, current_job: Number.NaN});
+        return res.send("No active job");
+      }
+
+      const result = req.body.workflow_run.conclusion;
+
+      if (result === "success") {
+        await updatePRStatus(
+          job.sha,
+          "success",
+          "Contract checks passed"
+        );
+      } else {
+        await updatePRStatus(
+          job.sha,
+          "failure",
+          "Contract checks failed"
+        );
+      }
+
+      saveState({ running: false, current_job: Number.NaN});
       await runNextIfIdle();
     }
 

@@ -1,3 +1,4 @@
 {
-  "running": false
+  "running": false,
+  "current_job": null
 }
