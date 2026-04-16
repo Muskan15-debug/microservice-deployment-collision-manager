@@ -1,0 +1,16 @@
+{
+  "repositories" : [
+    {
+      "name" : "Micro-dervice demo",
+      "owner" : "Muskan15-debug",
+      "repo" : "microservice-deployment-collision-manager",
+      "workflow" : "pipeline.yml",
+      "defaultBranch" : "main",
+      "priorityLabels" : {
+        "hotfix" : 3,
+        "high" : 2,
+        "normal" : 1
+      }
+    }
+  ]
+}

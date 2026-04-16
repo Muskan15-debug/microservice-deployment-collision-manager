@@ -11,40 +11,60 @@ const STATE_FILE = "./state.json";
 const PORT = 4000;
 
 const TOKEN = process.env.GITHUB_TOKEN
-const OWNER = process.env.OWNER
-const REPO = process.env.REPO
-const WORKFLOW = process.env.WORKFLOW
 
 // ---------- Init State ----------
 if (!fs.existsSync(STATE_FILE)) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ running: false, current_job: Number.NaN}, null, 2));
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ running: false, current_job: null}, null, 2));
+}
+
+// ---------- Load Configurations ----------
+
+function loadConfig() {
+  return JSON.parse(fs.readFileSync("./config.json", "utf8"));
 }
 
 // ---------- Queue Helpers ----------
-function loadQueue() {
-  return JSON.parse(fs.readFileSync(FILE, "utf8"));
+function loadQueue(repoName) {
+  return JSON.parse(fs.readFileSync(FILE, "utf8"))[repoName];
 }
 
-function saveQueue(queue) {
-  fs.writeFileSync(FILE, JSON.stringify(queue, null, 2));
+function saveQueue(queue, repoName) {
+  const data = JSON.parse(fs.readFileSync(FILE, "utf8"));
+  data[repoName] = queue
+  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-function loadState() {
-  return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+function loadState(repoName) {
+  return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"))[repoName];
 }
 
-function saveState(state) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+function saveState(state, repoName) {
+  const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  data[repoName] = state;
+  fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 
-function score(priority) {
-  if (priority === "hotfix") return 3;
-  if (priority === "high") return 2;
-  return 1;
+function score(priority, repoConfig){
+  return repoConfig.priorityLabels[priority];
 }
 
-function addPR(prNumber, branch, sha, priority) {
-  const queue = loadQueue();
+function getPriority(labels, repoConfig) {
+  let best = "normal";
+  let maxScore = 1;
+
+  for (const label of labels){
+    const score = repoConfig.priorityLabels[label];
+    if(score && score > maxScore){
+      maxScore = score;
+      best = label;
+    }
+  }
+
+  return best;
+}
+
+function addPR(prNumber, branch, sha, labels, repoConfig) {
+  const queue = loadQueue(repoConfig.repo);
 
   const alreadyExists = queue.find(q => q.prNumber == prNumber);
   if (alreadyExists) {
@@ -52,43 +72,46 @@ function addPR(prNumber, branch, sha, priority) {
     return;
   }
 
+  const priority = getPriority(labels, repoConfig);
+
   queue.push({
     prNumber,
     branch,
     sha,
     priority,
+    repoConfig,
     createdAt: Date.now()
   });
 
   queue.sort((a, b) => {
-    if (score(b.priority) !== score(a.priority)) {
-      return score(b.priority) - score(a.priority);
+    if (score(b.priority, b.repoConfig) !== score(a.priority, a.repoConfig)) {
+      return score(b.priority, b.repoConfig) - score(a.priority, a.repoConfig);
     }
     return a.createdAt - b.createdAt;
   });
 
-  saveQueue(queue);
+  saveQueue(queue, repoConfig.repo);
   console.log("Updated Queue:", queue);
 }
 
-function nextPR() {
-  const queue = loadQueue();
+function nextPR(repoName) {
+  const queue = loadQueue(repoName);
   if (queue.length === 0) return null;
 
   const job = queue.shift();
-  saveQueue(queue);
+  saveQueue(queue, repoName);
   return job;
 }
 
 // ---------Trigger the workflow--------
 
 async function triggerWorkflow(job) {
-  const url = `https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/dispatches`;
+  const url = `https://api.github.com/repos/${job.repoConfig.owner}/${job.repoConfig.repo}/actions/workflows/${job.repoConfig.workflow}/dispatches`;
 
   await axios.post(
     url,
     {
-      ref: job.branch,
+      ref: job.repoConfig.defaultBranch,
       inputs: {
         prNumber: String(job.prNumber),
         branch: job.branch
@@ -105,8 +128,8 @@ async function triggerWorkflow(job) {
   console.log(`Triggered PR #${job.prNumber}`);
 }
 
-async function updatePRStatus(sha, state, description) {
-  const url = `https://api.github.com/repos/${OWNER}/${REPO}/statuses/${sha}`;
+async function updatePRStatus(sha, state, description, repoConfig) {
+  const url = `https://api.github.com/repos/${repoConfig.owner}/${repoConfig.repo}/statuses/${sha}`;
 
   await axios.post(
     url,
@@ -114,7 +137,7 @@ async function updatePRStatus(sha, state, description) {
       state, // pending, success, failure, error
       context: "collision-manager",
       description,
-      target_url: `https://github.com/${OWNER}/${REPO}/actions`
+      target_url: `https://github.com/${repoConfig.owner}/${repoConfig.repo}/actions`
     },
     {
       headers: {
@@ -127,15 +150,15 @@ async function updatePRStatus(sha, state, description) {
   console.log(`Status updated: ${state} for ${sha}`);
 }
 
-async function runNextIfIdle() {
-  const state = loadState();
+async function runNextIfIdle(repoConfig) {
+  const state = loadState(repoConfig.repo);
 
   if (state.running) {
     console.log("Deployment already running");
     return;
   }
 
-  const job = nextPR();
+  const job = nextPR(repoConfig.repo);
 
   if (!job) {
     console.log("Queue empty");
@@ -145,13 +168,14 @@ async function runNextIfIdle() {
   saveState({ 
     running: true,
     current_job: job 
-  });
+  }, repoConfig.repo);
 
   try {
     await updatePRStatus(
       job.sha,
       "pending",
-      "Deployment validation running"
+      "Deployment validation running",
+      job.repoConfig
     );
     await triggerWorkflow(job);
   } catch (err) {
@@ -160,9 +184,10 @@ async function runNextIfIdle() {
     await updatePRStatus(
       job.sha,
       "error",
-      "Failed to start deployment pipeline"
+      "Failed to start deployment pipeline",
+      job.repoConfig
     );
-    saveState({ running: false, current_job: Number.NaN});
+    saveState({ running: false, current_job: null}, repoConfig.repo);
   }
 }
 
@@ -170,6 +195,18 @@ async function runNextIfIdle() {
 //  https://skyrocket-wasabi-happening.ngrok-free.dev
 app.post("/webhook", async (req, res) => {
   const event = req.headers["x-github-event"];
+  const repoName = req.body.repository.name;
+  const ownerName = req.body.repository.owner.login;
+  
+  const config = loadConfig();
+
+  const repoConfig = config.repositories.find(
+    r => r.repo === repoName && r.owner === ownerName
+  );
+  
+  if (!repoConfig) {
+    return res.status(404).send("Repository not registered");
+  }
 
   // ---------------- PR CREATED / UPDATED ----------------
   if (event === "pull_request") {
@@ -180,12 +217,8 @@ app.post("/webhook", async (req, res) => {
       const sha = pr.head.sha;
       const labels = pr.labels.map(l => l.name);
 
-      let priority = "normal";
-      if (labels.includes("hotfix")) priority = "hotfix";
-      else if (labels.includes("high")) priority = "high";
-
-      addPR(pr.number, pr.head.ref, sha, priority);
-      await runNextIfIdle();
+      addPR(pr.number, pr.head.ref, sha, labels, repoConfig);
+      await runNextIfIdle(repoConfig);
     }
 
     return res.send("PR processed");
@@ -196,11 +229,11 @@ app.post("/webhook", async (req, res) => {
     const action = req.body.action;
 
     if (action === "completed") {
-      const state = loadState();
+      const state = loadState(repoConfig.repo);
       const job = state.current_job;
 
-      if(job===Number.isNaN()){
-        saveState({ running: false, current_job: Number.NaN});
+      if(!job){
+        saveState({ running: false, current_job: null}, repoConfig.repo);
         return res.send("No active job");
       }
 
@@ -210,18 +243,20 @@ app.post("/webhook", async (req, res) => {
         await updatePRStatus(
           job.sha,
           "success",
-          "Contract checks passed"
+          "Contract checks passed",
+          job.repoConfig
         );
       } else {
         await updatePRStatus(
           job.sha,
           "failure",
-          "Contract checks failed"
+          "Contract checks failed",
+          job.repoConfig
         );
       }
 
-      saveState({ running: false, current_job: Number.NaN});
-      await runNextIfIdle();
+      saveState({ running: false, current_job: null}, repoConfig.repo);
+      await runNextIfIdle(repoConfig);
     }
 
     return res.send("Workflow completion processed");

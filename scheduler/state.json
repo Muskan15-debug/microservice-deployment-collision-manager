@@ -1,4 +1,6 @@
 {
-  "running": false,
-  "current_job": null
+  "microservice-deployment-collision-manager" : {
+    "running": false,
+    "current_job": null
+  }
 }
