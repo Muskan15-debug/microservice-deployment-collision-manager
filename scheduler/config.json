@@ -1,7 +1,7 @@
 {
   "repositories" : [
     {
-      "name" : "Micro-dervice demo",
+      "name" : "Micro-service demo",
       "owner" : "Muskan15-debug",
       "repo" : "microservice-deployment-collision-manager",
       "workflow" : "pipeline.yml",

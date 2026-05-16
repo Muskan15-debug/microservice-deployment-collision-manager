@@ -1,5 +1,5 @@
 {
-  "microservice-deployment-collision-manager" : {
+  "microservice-deployment-collision-manager": {
     "running": false,
     "current_job": null
   }
